@@ -4,7 +4,7 @@ This project is designed to convert audio files of songs (specifically musical i
 
 ## Libraries used
 
-librosa, music21, sklearn, numpy, matplotlib, mutagen
+librosa, music21, sklearn, numpy, matplotlib, mutagen, Lilypond
 
 ## Features
 
