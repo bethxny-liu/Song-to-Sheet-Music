@@ -1,6 +1,6 @@
 # Song to Sheet Music Converter
 
-This project is designed to conevrt audio files of songs (specifically musical instruments such as piano and violin) into sheet music notation.
+This project is designed to convert audio files of songs (specifically musical instruments such as piano and violin) into sheet music notation.
 
 ## Libraries used
 
