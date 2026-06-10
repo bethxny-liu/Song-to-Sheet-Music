@@ -1,6 +1,4 @@
-# Audio to Sheet Music
-
-Upload audio, get sheet music. Next.js frontend + FastAPI backend + Python transcription pipeline.
+<img width="991" height="192" alt="image" src="https://github.com/user-attachments/assets/1463e626-efa2-4112-8d38-3685a985ba61" />
 
 ## Demo
 
