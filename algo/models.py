@@ -17,6 +17,10 @@ class PipelineOptions:
     """melody: single treble staff, monophonic path only (simple melodies / tutorials).
     grand: piano grand staff; may use polyphonic top-voice when detection is weak."""
     layout: Literal["melody", "grand"] = "melody"
+    """When True, run Demucs piano-stem isolation before transcription (mixed audio)."""
+    isolate_piano: bool = False
+    basic_pitch_onset_threshold: float | None = None
+    basic_pitch_frame_threshold: float | None = None
 
 
 @dataclass
@@ -29,3 +33,5 @@ class PipelineResult:
     pitch_midi: list[float | None]
     note_confidences: list[dict[str, float | str | int | None]]
     chord_events: list[dict[str, float | str]]
+    transcription_engine: str = "pyin"
+    preprocessing: str = "none"

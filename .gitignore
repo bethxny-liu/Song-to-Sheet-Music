@@ -1,13 +1,15 @@
 .venv/
 __pycache__/
-old/
 *.pyc
 *.pyo
 *.pyd
 .DS_Store
+*.mp3
+!docs/demo/*.mp3
 
 backend/.env
 backend/storage/
+reports/
 
 frontend/node_modules/
 frontend/.next/

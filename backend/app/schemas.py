@@ -9,6 +9,7 @@ class ConversionOptions(BaseModel):
     tempo_bpm: int = 90
     instrument_name: str = "piano"
     layout: Literal["melody", "grand"] = "melody"
+    isolate_piano: bool = False
 
 
 class KeyEstimate(BaseModel):
@@ -46,4 +47,6 @@ class ConversionResult(BaseModel):
     note_confidences: list[NoteConfidence]
     chord_events: list[ChordEvent]
     note_count: int
+    transcription_engine: str = "pyin"
+    preprocessing: str = "none"
     artifacts: dict[str, str]

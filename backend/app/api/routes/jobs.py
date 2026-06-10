@@ -1,14 +1,20 @@
+import asyncio
+from functools import lru_cache, partial
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from backend.app.config import STORAGE_DIR
 from backend.app.schemas import ConversionOptions, ConversionResult
 from backend.app.services.conversion_service import ConversionService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-service = ConversionService(storage_dir=PROJECT_ROOT / "backend" / "storage")
+
+
+@lru_cache
+def get_conversion_service() -> ConversionService:
+    return ConversionService(storage_dir=STORAGE_DIR)
 
 
 @router.post("/convert", response_model=ConversionResult)
@@ -20,6 +26,8 @@ async def convert_audio(
     tempo_bpm: int = Form(90),
     instrument_name: str = Form("piano"),
     layout: str = Form("melody"),
+    isolate_piano: bool = Form(False),
+    service: ConversionService = Depends(get_conversion_service),
 ) -> ConversionResult:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file name provided.")
@@ -36,5 +44,14 @@ async def convert_audio(
         tempo_bpm=tempo_bpm,
         instrument_name=instrument_name,
         layout=layout if layout in ("melody", "grand") else "melody",
+        isolate_piano=isolate_piano,
     )
-    return service.convert(temp_file_path, options, str(request.base_url).rstrip("/"))
+    base_url = str(request.base_url).rstrip("/")
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None,
+            partial(service.convert, temp_file_path, options, base_url),
+        )
+    finally:
+        temp_file_path.unlink(missing_ok=True)

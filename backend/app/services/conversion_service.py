@@ -4,6 +4,9 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from music21 import harmony
 from algo.pipeline import AudioToSheetPipeline, PipelineOptions
@@ -38,7 +41,9 @@ class ConversionService:
                 tempo_bpm=options.tempo_bpm,
                 instrument_name=options.instrument_name,
                 layout=options.layout,
+                isolate_piano=options.isolate_piano,
             ),
+            work_dir=output_dir,
         )
 
         xml_path = output_dir / "score.musicxml"
@@ -56,14 +61,11 @@ class ConversionService:
             options.title,
         )
 
-        relative_dir = f"backend/storage/{job_id}"
         artifacts = {
             "musicxml_url": f"{base_url}/artifacts/{job_id}/score.musicxml",
             "text_url": f"{base_url}/artifacts/{job_id}/score.txt",
             "pitch_chart_url": f"{base_url}/artifacts/{job_id}/pitch_chart.png",
             "result_json_url": f"{base_url}/artifacts/{job_id}/result.json",
-            "storage_path": str(output_dir.resolve()),
-            "relative_storage_path": relative_dir,
         }
         result = ConversionResult(
             job_id=job_id,
@@ -81,6 +83,8 @@ class ConversionService:
                 [] if chords_stripped else [ChordEvent(**event) for event in pipeline_result.chord_events]
             ),
             note_count=pipeline_result.note_count,
+            transcription_engine=pipeline_result.transcription_engine,
+            preprocessing=pipeline_result.preprocessing,
             artifacts=artifacts,
         )
         json_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
@@ -91,7 +95,7 @@ class ConversionService:
         try:
             score.write("musicxml", fp=str(xml_path))
             return False
-        except Exception:
+        except (ValueError, OSError, TypeError):
             chord_symbols = list(score.recurse().getElementsByClass(harmony.ChordSymbol))
             for symbol in chord_symbols:
                 parent = symbol.activeSite

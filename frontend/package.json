@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "jspdf": "^2.5.2",
     "next": "^14.2.0",
     "opensheetmusicdisplay": "^1.9.2",
     "react": "^18.3.1",

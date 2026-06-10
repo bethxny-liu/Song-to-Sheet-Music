@@ -1,0 +1,27 @@
+{
+  "description": "Minimum acceptable metrics for synthetic regression fixtures. Tune as the pipeline improves.",
+  "onset_tolerance_sec": 0.12,
+  "pitch_tolerance_cents": 50.0,
+  "fixtures": {
+    "c_major_scale": {
+      "layout": "melody",
+      "tempo_bpm": 120,
+      "expected_key": "C major",
+      "thresholds": {
+        "note_f1": 0.35,
+        "pitch_accuracy": 0.45,
+        "min_detected_notes": 5
+      }
+    },
+    "repeated_c": {
+      "layout": "melody",
+      "tempo_bpm": 120,
+      "expected_key": "C major",
+      "thresholds": {
+        "note_f1": 0.25,
+        "pitch_accuracy": 0.5,
+        "min_detected_notes": 2
+      }
+    }
+  }
+}

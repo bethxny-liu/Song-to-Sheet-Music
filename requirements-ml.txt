@@ -1,0 +1,4 @@
+-r requirements-dev.txt
+# Optional: piano stem isolation (CPU inference; also requires ffmpeg on PATH)
+demucs>=4.0.0
+torch>=2.0.0

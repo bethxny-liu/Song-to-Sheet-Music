@@ -3,6 +3,9 @@ uvicorn
 python-multipart
 librosa
 music21
-numpy
+numpy<2
 matplotlib
 mutagen
+basic-pitch>=0.3.0,<0.4
+onnxruntime>=1.16
+setuptools<81

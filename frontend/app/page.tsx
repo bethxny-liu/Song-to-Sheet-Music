@@ -9,55 +9,9 @@ import {
   useState
 } from "react";
 
-type Result = {
-  job_id: string;
-  title: string;
-  composer: string;
-  tempo_bpm: number;
-  instrument_name: string;
-  estimated_key: string;
-  estimated_key_candidates: Array<{
-    key: string;
-    score: number;
-  }>;
-  note_confidences: Array<{
-    onset_quarter: number;
-    duration_quarter: number;
-    type: string;
-    midi: number | null;
-    confidence: number;
-    reattack_confidence: number | null;
-    boundary_source: string;
-    boundary_confidence: number;
-    hand?: string | null;
-  }>;
-  chord_events: Array<{
-    onset_sec: number;
-    duration_sec: number;
-    chord: string;
-    confidence: number;
-  }>;
-  note_count: number;
-  artifacts: {
-    musicxml_url: string;
-    text_url: string;
-    pitch_chart_url: string;
-    result_json_url: string;
-    storage_path: string;
-    relative_storage_path: string;
-  };
-};
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-function getFriendlyHttpError(status: number): string {
-  if (status === 400) return "Your upload request is invalid. Check fields and audio file.";
-  if (status === 413) return "The uploaded file is too large.";
-  if (status === 415) return "Unsupported file type. Try mp3, wav, or m4a.";
-  if (status === 422) return "Some form values are invalid. Please review and retry.";
-  if (status >= 500) return "Backend conversion crashed. Check backend terminal logs.";
-  return `Request failed with status ${status}.`;
-}
+import { API_BASE, convertAudio } from "../lib/api";
+import { exportSheetMusicPdf } from "../lib/exportPdf";
+import type { ConversionResult } from "../lib/types";
 
 function statusBarClass(loading: boolean, error: string | null, hasResult: boolean): string {
   if (loading) return "status-bar status-bar--loading";
@@ -67,18 +21,25 @@ function statusBarClass(loading: boolean, error: string | null, hasResult: boole
 }
 
 export default function HomePage() {
-  const [result, setResult] = useState<Result | null>(null);
+  const [result, setResult] = useState<ConversionResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("Ready — upload an audio file to begin.");
-  const [rawResponse, setRawResponse] = useState("");
   const [sheetRenderError, setSheetRenderError] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled");
   const [layout, setLayout] = useState<"melody" | "grand">("melody");
+  const [isolatePiano, setIsolatePiano] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [sheetReady, setSheetReady] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
   const sheetContainerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const osmdRef = useRef<{
+    drawer: { Backends: Array<{ getSvgElement: () => SVGElement }> };
+    rules: { PageFormat?: { IsUndefined?: boolean; width: number; height: number } };
+    backendType: number;
+  } | null>(null);
 
   function applySelectedFile(file: File | undefined) {
     if (!file) return;
@@ -125,6 +86,8 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSheetReady(false);
+    osmdRef.current = null;
     setStatusText("Uploading audio…");
 
     const formData = new FormData(event.currentTarget);
@@ -132,24 +95,8 @@ export default function HomePage() {
 
     try {
       setStatusText("Analyzing pitch, rhythm, and key…");
-      const response = await fetch(`${API_BASE}/jobs/convert`, {
-        method: "POST",
-        body: formData
-      });
-      if (!response.ok) {
-        let backendDetail = "";
-        try {
-          const json = (await response.json()) as { detail?: string };
-          backendDetail = json.detail ? ` ${json.detail}` : "";
-        } catch {
-          const text = await response.text();
-          backendDetail = text ? ` ${text.slice(0, 200)}` : "";
-        }
-        throw new Error(`${getFriendlyHttpError(response.status)}${backendDetail}`);
-      }
-      const data = (await response.json()) as Result;
+      const data = await convertAudio(formData);
       setResult(data);
-      setRawResponse(JSON.stringify(data, null, 2));
       setStatusText("Conversion complete.");
     } catch (err) {
       if (err instanceof TypeError) {
@@ -169,16 +116,21 @@ export default function HomePage() {
     async function renderSheetMusic() {
       if (!result?.artifacts.musicxml_url || !sheetContainerRef.current) return;
       setSheetRenderError(null);
+      setSheetReady(false);
+      osmdRef.current = null;
       sheetContainerRef.current.innerHTML = "";
       try {
         const xmlText = await fetch(result.artifacts.musicxml_url).then((res) => res.text());
-        const { OpenSheetMusicDisplay } = await import("opensheetmusicdisplay");
+        const { OpenSheetMusicDisplay, BackendType } = await import("opensheetmusicdisplay");
         const osmd = new OpenSheetMusicDisplay(sheetContainerRef.current, {
           autoResize: true,
-          drawTitle: true
+          drawTitle: true,
+          backendType: BackendType.SVG
         });
         await osmd.load(xmlText);
         osmd.render();
+        osmdRef.current = osmd as typeof osmdRef.current;
+        setSheetReady(true);
       } catch {
         setSheetRenderError(
           "Could not render the sheet preview in your browser. Use the MusicXML download below."
@@ -188,6 +140,21 @@ export default function HomePage() {
 
     renderSheetMusic();
   }, [result]);
+
+  async function handleDownloadPdf() {
+    if (!osmdRef.current || !result) return;
+    setPdfExporting(true);
+    try {
+      const safeTitle = result.title.replace(/[^\w\s-]/g, "").trim() || "sheet-music";
+      await exportSheetMusicPdf(osmdRef.current, `${safeTitle}.pdf`);
+    } catch (err) {
+      setSheetRenderError(
+        err instanceof Error ? err.message : "Could not export PDF. Try the MusicXML download instead."
+      );
+    } finally {
+      setPdfExporting(false);
+    }
+  }
 
   const lowConfidenceEvents = result
     ? [...result.note_confidences]
@@ -202,7 +169,7 @@ export default function HomePage() {
         <h1 className="hero__title">Audio to Sheet Music</h1>
         <p className="hero__subtitle">
           Upload a recording and get printable sheet music, a pitch chart, and detailed
-          analysis — tuned for simple melodies or full piano arrangements.
+          analysis for simple melodies or full piano&nbsp;arrangements.
         </p>
       </header>
 
@@ -314,14 +281,32 @@ export default function HomePage() {
                     setLayout(event.target.value === "grand" ? "grand" : "melody")
                   }
                 >
-                  <option value="melody">Single staff — melody on treble</option>
-                  <option value="grand">Grand staff — two hands (complex piano)</option>
+                  <option value="melody">Single staff</option>
+                  <option value="grand">Grand staff</option>
                 </select>
                 <p className="field__hint">
-                  Use single staff for tutorials and simple melodies. Use grand staff for dense
-                  piano pieces.
+                  Single staff for simple melodies. Grand staff for piano with two hands.
                 </p>
               </div>
+
+              {layout === "grand" ? (
+                <div className="field">
+                  <label className="field__checkbox" htmlFor="isolate_piano">
+                    <input
+                      id="isolate_piano"
+                      name="isolate_piano"
+                      type="checkbox"
+                      value="true"
+                      checked={isolatePiano}
+                      onChange={(event) => setIsolatePiano(event.target.checked)}
+                    />
+                    Isolate piano from mixed audio
+                  </label>
+                  <p className="field__hint">
+                    Best for recordings with vocals over piano. Requires Demucs on the server.
+                  </p>
+                </div>
+              ) : null}
 
               <button className="btn" type="submit" disabled={loading || !selectedFile}>
                 {loading ? (
@@ -400,6 +385,16 @@ export default function HomePage() {
                       <span className="stat__value">{result.chord_events.length}</span>
                     </div>
                   ) : null}
+                  <div className="stat">
+                    <span className="stat__label">Engine</span>
+                    <span className="stat__value">{result.transcription_engine}</span>
+                  </div>
+                  {result.preprocessing !== "none" ? (
+                    <div className="stat">
+                      <span className="stat__label">Preprocess</span>
+                      <span className="stat__value">{result.preprocessing}</span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -424,6 +419,14 @@ export default function HomePage() {
                 <div>
                   <h3 className="section-title">Downloads</h3>
                   <div className="btn-group">
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={handleDownloadPdf}
+                      disabled={!sheetReady || pdfExporting || !!sheetRenderError}
+                    >
+                      {pdfExporting ? "Exporting PDF…" : "PDF"}
+                    </button>
                     <a
                       className="btn btn--secondary"
                       href={result.artifacts.musicxml_url}
@@ -526,10 +529,10 @@ export default function HomePage() {
                       <strong>Job ID:</strong> {result.job_id}
                     </p>
                     <p>
-                      <strong>Storage:</strong>{" "}
-                      <code>{result.artifacts.relative_storage_path}</code>
+                      <a href={result.artifacts.result_json_url} target="_blank" rel="noreferrer">
+                        View full JSON response
+                      </a>
                     </p>
-                    <pre className="code-block">{rawResponse}</pre>
                   </div>
                 </details>
               </div>

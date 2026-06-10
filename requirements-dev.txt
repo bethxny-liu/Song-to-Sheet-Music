@@ -1,0 +1,4 @@
+-r backend/requirements.txt
+pytest>=8.0
+soundfile>=0.12
+mir_eval>=0.7
