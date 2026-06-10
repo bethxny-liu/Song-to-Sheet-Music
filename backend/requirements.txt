@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-multipart
+librosa
+music21
+numpy
+matplotlib
+mutagen
