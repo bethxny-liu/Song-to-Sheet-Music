@@ -40,7 +40,7 @@ def fallback_f0_from_piptrack(
 def polyphonic_top_voice_track(
     signal: np.ndarray, sample_rate: int, hop_length: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Estimate melody from polyphonic audio with continuity bias (legacy fallback)."""
+    """Melody estimate from HPSS + piptrack, with a continuity bias."""
     harmonic, _ = librosa.effects.hpss(signal)
     pitches, magnitudes = librosa.piptrack(
         y=harmonic,

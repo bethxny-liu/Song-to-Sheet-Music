@@ -50,6 +50,70 @@ def write_wav(path: Path, signal: np.ndarray, sample_rate: int) -> Path:
     return path
 
 
+def synthesize_benchmark_audio(
+    notes: list[ReferenceNote],
+    sample_rate: int = 44100,
+    amplitude: float = 0.32,
+) -> tuple[np.ndarray, int]:
+    """Render absolute note timings, including overlapping notes, with clear attacks."""
+    if not notes:
+        return np.zeros(sample_rate, dtype=np.float32), sample_rate
+
+    end_sec = max(n.offset_sec for n in notes) + 0.25
+    signal = np.zeros(int(end_sec * sample_rate), dtype=np.float32)
+    for note in notes:
+        sample_count = max(1, int(note.duration_sec * sample_rate))
+        t = np.arange(sample_count, dtype=np.float32) / sample_rate
+        frequency = 440.0 * (2.0 ** ((note.midi - 69) / 12.0))
+        tone = (
+            np.sin(2.0 * np.pi * frequency * t)
+            + 0.20 * np.sin(4.0 * np.pi * frequency * t)
+        ).astype(np.float32)
+
+        attack = min(sample_count, max(1, int(0.008 * sample_rate)))
+        release = min(sample_count - attack, max(1, int(0.025 * sample_rate)))
+        envelope = np.ones(sample_count, dtype=np.float32)
+        envelope[:attack] = np.linspace(0.0, 1.0, attack, dtype=np.float32)
+        if release:
+            envelope[-release:] = np.linspace(1.0, 0.0, release, dtype=np.float32)
+
+        start = max(0, int(note.onset_sec * sample_rate))
+        end = min(len(signal), start + sample_count)
+        signal[start:end] += amplitude * tone[: end - start] * envelope[: end - start]
+
+    peak = float(np.max(np.abs(signal)))
+    if peak > 0:
+        signal = signal / peak * 0.9
+    return signal, sample_rate
+
+
+def build_tempo_reference(
+    tempo_bpm: int,
+    texture: str = "monophonic",
+) -> list[ReferenceNote]:
+    """Eight sixteenths at `tempo_bpm`. texture: monophonic | two_note_harmony | chords."""
+    melody = [64, 62, 60, 62, 64, 64, 64, 62]
+    event_sec = 15.0 / float(tempo_bpm)
+    duration = event_sec * 0.78
+    start_sec = 0.20
+    notes: list[ReferenceNote] = []
+    for index, midi in enumerate(melody):
+        onset = start_sec + index * event_sec
+        pitches = [midi]
+        if texture == "two_note_harmony":
+            pitches.append(midi - 4)
+        elif texture == "chords":
+            root = midi - 12
+            pitches.extend([root, root + 4, root + 7])
+        elif texture != "monophonic":
+            raise ValueError(f"Unknown benchmark texture: {texture}")
+        notes.extend(
+            ReferenceNote(midi=pitch, onset_sec=onset, duration_sec=duration)
+            for pitch in sorted(set(pitches))
+        )
+    return notes
+
+
 def build_c_major_scale_reference() -> list[ReferenceNote]:
     """C4–C5 major scale, quarter-note-like spacing at 120 BPM."""
     midis = [60, 62, 64, 65, 67, 69, 71, 72]
@@ -64,7 +128,7 @@ def build_c_major_scale_reference() -> list[ReferenceNote]:
 
 
 def build_repeated_c_reference() -> list[ReferenceNote]:
-    """Three sustained C4 notes — tests note segmentation on repeated pitch."""
+    """Three C4 notes with gaps; tests repeated-pitch splits."""
     dur = 0.5
     gap = 0.2
     notes: list[ReferenceNote] = []

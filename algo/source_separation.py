@@ -1,4 +1,4 @@
-"""Optional piano stem isolation via Demucs (for mixed vocal+piano recordings)."""
+"""Optional Demucs piano-stem isolation."""
 
 from __future__ import annotations
 

@@ -62,7 +62,7 @@ def test_basic_pitch_on_synthetic_scale(
     tmp_path: Path,
     c_major_scale_reference: list[ReferenceNote],
 ):
-    """Neural path baseline on clean synthetic audio (skipped if Basic Pitch unavailable)."""
+    """Basic Pitch baseline on synthetic audio. Skipped if the model is missing."""
     from algo.basic_pitch_transcriber import is_available, transcribe
     from algo.evaluation import GRAND_BP_FRAME_THRESHOLD, GRAND_BP_ONSET_THRESHOLD
     from algo.metrics import evaluate_transcription, reference_to_arrays, timed_notes_to_arrays

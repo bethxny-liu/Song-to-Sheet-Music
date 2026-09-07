@@ -29,6 +29,35 @@ def test_no_estimates_scores_zero():
     assert metrics.recall == 0.0
 
 
+def test_evaluate_pipeline_result_prefers_detected_notes():
+    from algo.metrics import evaluate_pipeline_result
+    from algo.models import DetectedNote, PipelineResult
+    from music21 import stream
+
+    reference = [ReferenceNote(midi=60, onset_sec=0.2, duration_sec=0.4)]
+    result = PipelineResult(
+        estimated_key="C major",
+        estimated_key_candidates=[],
+        note_count=1,
+        score=stream.Score(),
+        pitch_times_sec=[],
+        pitch_midi=[],
+        note_confidences=[
+            {
+                "type": "note",
+                "midi": 60,
+                "onset_quarter": 0.0,
+                "duration_quarter": 1.0,
+                "confidence": 1.0,
+            }
+        ],
+        chord_events=[],
+        detected_notes=[DetectedNote(midi=60, onset_sec=0.2, duration_sec=0.4)],
+    )
+    metrics = evaluate_pipeline_result(result, reference, tempo_bpm=90, onset_tolerance=0.05)
+    assert metrics.f1 == 1.0
+
+
 def test_meets_thresholds_reports_failures():
     from algo.metrics import TranscriptionMetrics
 

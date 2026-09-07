@@ -4,6 +4,24 @@ from music21 import note
 
 from algo.models import NoteEvent
 
+ONSET_BOUNDARY_SOURCES = {"onset", "attack", "onset+attack"}
+
+
+def is_split_boundary(
+    has_attack: bool,
+    boundary_source: str,
+    boundary_confidence: float,
+    *,
+    min_confidence: float = 0.12,
+) -> bool:
+    """Whether this boundary should split a repeated pitch."""
+    if has_attack:
+        return True
+    return (
+        boundary_source in ONSET_BOUNDARY_SOURCES
+        and boundary_confidence >= min_confidence
+    )
+
 
 def compute_reattack_confidence(has_attack: bool, left_frames: int, right_frames: int) -> float:
     base = 0.0 if not has_attack else 0.65
@@ -12,7 +30,11 @@ def compute_reattack_confidence(has_attack: bool, left_frames: int, right_frames
 
 
 def compress_pitch_track(
-    segments: list[tuple[float | None, int, bool, float, str, float]]
+    segments: list[tuple[float | None, int, bool, float, str, float]],
+    *,
+    reattack_min_frames: int = 24,
+    min_note_frames: int = 3,
+    min_rest_frames: int = 8,
 ) -> list[NoteEvent]:
     runs: list[tuple[float | None, int, bool, float, float | None, str, float]] = []
     for pitch, frames, has_attack, confidence, boundary_source, boundary_confidence in segments:
@@ -31,7 +53,13 @@ def compress_pitch_track(
         if (pitch is None and prev_pitch is None) or (
             pitch is not None and prev_pitch is not None and abs(pitch - prev_pitch) < 0.5
         ):
-            if has_attack and frames >= 24 and prev_frames >= 24:
+            split_repeated = (
+                pitch is not None
+                and is_split_boundary(has_attack, boundary_source, boundary_confidence)
+                and frames >= reattack_min_frames
+                and prev_frames >= reattack_min_frames
+            )
+            if split_repeated:
                 reattack_conf = compute_reattack_confidence(
                     has_attack=has_attack, left_frames=prev_frames, right_frames=frames
                 )
@@ -67,7 +95,11 @@ def compress_pitch_track(
         (pitch, frames, conf, reattack, source, bconf)
         for pitch, frames, _, conf, reattack, source, bconf in runs
     ]
-    return merge_short_runs(compressed)
+    return merge_short_runs(
+        compressed,
+        min_frames=min_note_frames,
+        min_rest_frames=min_rest_frames,
+    )
 
 
 def merge_short_runs(
@@ -126,7 +158,12 @@ def merge_tiny_same_pitch_fragments(
             and prev_pitch is not None
             and abs(float(pitch) - float(prev_pitch)) < 0.5
         )
-        if same_pitch and frames <= tiny_fragment_max_frames:
+        keep_onset_split = (
+            same_pitch
+            and is_split_boundary(False, bsource, bconf)
+            and frames > 2
+        )
+        if same_pitch and frames <= tiny_fragment_max_frames and not keep_onset_split:
             total = prev_frames + frames
             merged[-1] = (
                 prev_pitch,
@@ -154,7 +191,8 @@ def bridge_same_pitch_across_tiny_rests(
             p2, f2, c2, r2, s2, b2 = runs[i + 1]
             p3, f3, c3, r3, s3, b3 = runs[i + 2]
             same_note = p1 is not None and p3 is not None and abs(float(p1) - float(p3)) < 0.5
-            if same_note and p2 is None and f2 <= tiny_rest_max_frames:
+            articulated = is_split_boundary(False, s3, b3)
+            if same_note and p2 is None and f2 <= tiny_rest_max_frames and not articulated:
                 total = f1 + f2 + f3
                 weighted_conf = ((c1 * f1) + (c2 * f2) + (c3 * f3)) / max(1, total)
                 bridged.append((p1, total, weighted_conf, r1 if r1 is not None else r3, s1, max(b1, b2, b3)))
@@ -184,7 +222,8 @@ def merge_low_confidence_boundary_splits(
             )
         weak_split = bconf < weak_boundary_threshold and frames <= short_note_max_frames
         very_weak_boundary = bconf < force_merge_boundary_threshold
-        if same_pitch and (weak_split or very_weak_boundary):
+        onset_split = is_split_boundary(False, source, bconf)
+        if same_pitch and (weak_split or very_weak_boundary) and not onset_split:
             total = prev_frames + frames
             merged[-1] = (
                 prev_pitch,
@@ -213,7 +252,8 @@ def final_merge_weak_same_pitch_events(
         same_midi = int(round(float(pitch))) == int(round(float(prev_pitch)))
         weak_boundary = bconf < weak_boundary_threshold
         no_reattack = reattack is None
-        if same_midi and weak_boundary and no_reattack:
+        onset_split = is_split_boundary(False, source, bconf)
+        if same_midi and weak_boundary and no_reattack and not onset_split:
             total = prev_frames + frames
             merged[-1] = (
                 prev_pitch,

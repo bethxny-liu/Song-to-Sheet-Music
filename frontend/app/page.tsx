@@ -168,8 +168,8 @@ export default function HomePage() {
         <p className="hero__eyebrow">Audio transcription</p>
         <h1 className="hero__title">Audio to Sheet Music</h1>
         <p className="hero__subtitle">
-          Upload a recording and get printable sheet music, a pitch chart, and detailed
-          analysis for simple melodies or full piano&nbsp;arrangements.
+          Simple single-line melodies to printable sheet music. Grand staff uses Basic Pitch
+          and is less reliable.
         </p>
       </header>
 
@@ -285,7 +285,7 @@ export default function HomePage() {
                   <option value="grand">Grand staff</option>
                 </select>
                 <p className="field__hint">
-                  Single staff for simple melodies. Grand staff for piano with two hands.
+                  Single staff: pYIN, one melody. Grand staff: Basic Pitch, piano.
                 </p>
               </div>
 

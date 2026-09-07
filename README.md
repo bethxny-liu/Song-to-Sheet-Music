@@ -12,7 +12,13 @@
 
 **Output:** [mary-had-a-little-lamb.pdf](docs/demo/mary-had-a-little-lamb.pdf)
 
-All demo files live in [`docs/demo/`](docs/demo/).
+## Evaluation
+
+Same eight-note phrase vs raw pYIN, plus a separate polyphony table: [docs/EVALUATION.md](docs/EVALUATION.md).
+
+```bash
+make eval    # regenerates that report
+```
 
 ## Run locally
 
@@ -23,8 +29,6 @@ make setup      # once
 make backend    # terminal 1 → http://localhost:8000
 make frontend   # terminal 2 → http://localhost:3000
 ```
-
-**Modes:** Single staff (pYIN, simple melodies) · Grand staff (Basic Pitch, piano/polyphonic)
 
 **Optional — isolate piano from mixed audio:**
 ```bash

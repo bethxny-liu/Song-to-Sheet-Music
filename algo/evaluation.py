@@ -8,14 +8,32 @@ import json
 from pathlib import Path
 from typing import Any
 
-from algo.metrics import ReferenceNote, TranscriptionMetrics, evaluate_pipeline_result
+import librosa
+import numpy as np
+
+from algo.metrics import (
+    ReferenceNote,
+    TranscriptionMetrics,
+    evaluate_pipeline_result,
+    evaluate_transcription,
+    reference_to_arrays,
+)
 from algo.models import PipelineOptions
 from algo.pipeline import AudioToSheetPipeline
-from algo.synthetic_audio import BENCHMARK_FIXTURES_DIR, FIXTURE_BUILDERS, synthesize_melody, write_wav
+from algo.synthetic_audio import (
+    BENCHMARK_FIXTURES_DIR,
+    FIXTURE_BUILDERS,
+    build_tempo_reference,
+    synthesize_benchmark_audio,
+    synthesize_melody,
+    write_wav,
+)
 
 # Synthetic sine tones need lower Basic Pitch thresholds than real piano audio.
 GRAND_BP_ONSET_THRESHOLD = 0.3
 GRAND_BP_FRAME_THRESHOLD = 0.2
+CONTROLLED_TEMPOS = (60, 90, 120, 150, 180)
+CONTROLLED_TEXTURES = ("monophonic", "two_note_harmony", "chords")
 
 
 def load_baseline_targets(path: Path) -> dict[str, Any]:
@@ -45,6 +63,117 @@ class EngineComparisonRow:
     grand_notes: int
     grand_engine: str
     delta_f1: float
+
+
+@dataclass(frozen=True)
+class ControlledBenchmarkRow:
+    texture: str
+    tempo_bpm: int
+    layout: str
+    engine: str
+    baseline_f1: float | None
+    metrics: TranscriptionMetrics
+
+
+def evaluate_raw_pyin_baseline(
+    signal: np.ndarray,
+    sample_rate: int,
+    reference: list[ReferenceNote],
+    *,
+    hop_length: int = 512,
+    onset_tolerance: float = 0.12,
+) -> TranscriptionMetrics:
+    """Minimal frame-collapse pYIN baseline without onset-aware post-processing."""
+    f0, voiced, _probability = librosa.pyin(
+        signal,
+        sr=sample_rate,
+        hop_length=hop_length,
+        fmin=librosa.note_to_hz("C2"),
+        fmax=librosa.note_to_hz("C7"),
+    )
+    midi = np.full(len(f0), np.nan, dtype=float)
+    valid = np.asarray(voiced, dtype=bool) & ~np.isnan(f0)
+    midi[valid] = np.rint(librosa.hz_to_midi(f0[valid]))
+
+    intervals: list[list[float]] = []
+    pitches: list[float] = []
+    start: int | None = None
+    active_pitch: float | None = None
+    for frame in range(len(midi) + 1):
+        pitch = None if frame == len(midi) or np.isnan(midi[frame]) else float(midi[frame])
+        if pitch == active_pitch:
+            continue
+        if start is not None and active_pitch is not None:
+            intervals.append(
+                [start * hop_length / sample_rate, frame * hop_length / sample_rate]
+            )
+            pitches.append(active_pitch)
+        start = frame if pitch is not None else None
+        active_pitch = pitch
+
+    est_intervals = np.asarray(intervals, dtype=float).reshape((-1, 2))
+    est_pitches = np.asarray(pitches, dtype=float)
+    ref_intervals, ref_pitches = reference_to_arrays(reference)
+    return evaluate_transcription(
+        est_intervals,
+        est_pitches,
+        ref_intervals,
+        ref_pitches,
+        onset_tolerance=onset_tolerance,
+    )
+
+
+def run_controlled_benchmarks(
+    pipeline: AudioToSheetPipeline,
+    output_dir: Path,
+    *,
+    tempos: tuple[int, ...] = CONTROLLED_TEMPOS,
+    textures: tuple[str, ...] = CONTROLLED_TEXTURES,
+) -> list[ControlledBenchmarkRow]:
+    """Same phrase at each tempo; melody vs two-note vs chords."""
+    rows: list[ControlledBenchmarkRow] = []
+    audio_dir = output_dir / "controlled_audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    for texture in textures:
+        for tempo_bpm in tempos:
+            reference = build_tempo_reference(tempo_bpm, texture)
+            signal, sample_rate = synthesize_benchmark_audio(reference)
+            wav_path = write_wav(
+                audio_dir / f"{texture}-{tempo_bpm}bpm.wav", signal, sample_rate
+            )
+            layout = "melody" if texture == "monophonic" else "grand"
+            result = pipeline.run(
+                wav_path,
+                PipelineOptions(
+                    title=f"{texture} at {tempo_bpm} BPM",
+                    composer="Controlled benchmark",
+                    tempo_bpm=tempo_bpm,
+                    instrument_name="piano",
+                    layout=layout,  # type: ignore[arg-type]
+                    basic_pitch_onset_threshold=GRAND_BP_ONSET_THRESHOLD,
+                    basic_pitch_frame_threshold=GRAND_BP_FRAME_THRESHOLD,
+                ),
+                work_dir=output_dir,
+            )
+            metrics = evaluate_pipeline_result(
+                result, reference, tempo_bpm, onset_tolerance=0.12
+            )
+            baseline_f1 = None
+            if texture == "monophonic":
+                baseline_f1 = evaluate_raw_pyin_baseline(
+                    signal, sample_rate, reference, onset_tolerance=0.12
+                ).f1
+            rows.append(
+                ControlledBenchmarkRow(
+                    texture=texture,
+                    tempo_bpm=tempo_bpm,
+                    layout=layout,
+                    engine=result.transcription_engine,
+                    baseline_f1=baseline_f1,
+                    metrics=metrics,
+                )
+            )
+    return rows
 
 
 def run_fixture_benchmark(
@@ -191,12 +320,20 @@ def run_full_evaluation(
         benchmarks.append(benchmark)
         comparisons.append(comparison)
 
+    controlled = run_controlled_benchmarks(pipeline, output_dir)
     all_passed = all(b.passed for b in benchmarks)
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "all_passed": all_passed,
         "benchmarks": [_benchmark_to_dict(b) for b in benchmarks],
         "engine_comparison": [asdict(row) for row in comparisons],
+        "controlled_benchmarks": [
+            {
+                **asdict(row),
+                "metrics": row.metrics.to_dict(),
+            }
+            for row in controlled
+        ],
     }
     return report
 
@@ -253,18 +390,120 @@ def format_markdown_report(report: dict[str, Any]) -> str:
             f"| {row['delta_f1']:+.3f} | {row['grand_engine']} |"
         )
 
+    controlled = report.get("controlled_benchmarks", [])
+    lines.extend(_format_tempo_matrix(
+        [row for row in controlled if row["texture"] == "monophonic"]
+    ))
+    lines.extend(_format_polyphony_tables(controlled))
     lines.extend(
         [
-            "",
             "## Metrics",
             "",
             "- **F1**: note overlap precision/recall (mir_eval)",
+            "- **Onset F1**: onset matching only",
             "- **Pitch accuracy**: cents tolerance on onset-matched notes",
             "- Thresholds: `tests/fixtures/baseline_targets.json`",
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def _format_tempo_matrix(mono_rows: list[dict[str, Any]]) -> list[str]:
+    if not mono_rows:
+        return []
+
+    tempos = [row["tempo_bpm"] for row in mono_rows]
+    baseline = {row["tempo_bpm"]: row.get("baseline_f1") for row in mono_rows}
+    pipeline = {row["tempo_bpm"]: row["metrics"] for row in mono_rows}
+    header = "| Input | " + " | ".join(f"{t} BPM" for t in tempos) + " |"
+    divider = "|-------|" + "|".join("-------:" for _ in tempos) + "|"
+
+    def _cells(getter) -> str:
+        values = []
+        for tempo in tempos:
+            value = getter(tempo)
+            values.append("—" if value is None else f"{float(value):.3f}")
+        return " | ".join(values)
+
+    delta_cells = []
+    for tempo in tempos:
+        base = baseline.get(tempo)
+        if base is None:
+            delta_cells.append("—")
+        else:
+            delta_cells.append(f"{pipeline[tempo]['f1'] - float(base):+.3f}")
+
+    return [
+        "",
+        "## Controlled tempo benchmark",
+        "",
+        "Same eight-note phrase at each tempo. Baseline is raw pYIN frame collapse.",
+        "",
+        header,
+        divider,
+        "| pYIN baseline F1 | " + _cells(lambda t: baseline.get(t)) + " |",
+        "| Pipeline F1 | " + _cells(lambda t: pipeline[t]["f1"]) + " |",
+        "| Δ F1 | " + " | ".join(delta_cells) + " |",
+        "| Pipeline precision | " + _cells(lambda t: pipeline[t]["precision"]) + " |",
+        "| Pipeline recall | " + _cells(lambda t: pipeline[t]["recall"]) + " |",
+        "| Pipeline onset F1 | " + _cells(lambda t: pipeline[t]["onset_f1"]) + " |",
+        "",
+    ]
+
+
+def _format_polyphony_tables(controlled: list[dict[str, Any]]) -> list[str]:
+    poly_rows = [row for row in controlled if row["texture"] != "monophonic"]
+    if not poly_rows:
+        return []
+
+    textures: list[str] = []
+    tempos: list[int] = []
+    for row in poly_rows:
+        if row["texture"] not in textures:
+            textures.append(row["texture"])
+        if row["tempo_bpm"] not in tempos:
+            tempos.append(row["tempo_bpm"])
+
+    f1_by = {(row["texture"], row["tempo_bpm"]): row["metrics"]["f1"] for row in poly_rows}
+    header = "| Texture | " + " | ".join(f"{t} BPM" for t in tempos) + " |"
+    divider = "|---------|" + "|".join("-------:" for _ in tempos) + "|"
+
+    lines = [
+        "",
+        "## Polyphony benchmark",
+        "",
+        "Basic Pitch, grand staff.",
+        "",
+        header,
+        divider,
+    ]
+    for texture in textures:
+        cells = []
+        for tempo in tempos:
+            value = f1_by.get((texture, tempo))
+            cells.append("—" if value is None else f"{value:.3f}")
+        lines.append(
+            f"| {texture.replace('_', ' ')} F1 | " + " | ".join(cells) + " |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "| Texture | Tempo | Engine | Precision | Recall | F1 | Onset F1 |",
+            "|---------|------:|--------|----------:|-------:|---:|---------:|",
+        ]
+    )
+    for row in poly_rows:
+        metrics = row["metrics"]
+        lines.append(
+            f"| {row['texture'].replace('_', ' ')} | {row['tempo_bpm']} BPM "
+            f"| {row['engine']} | {metrics['precision']:.3f} "
+            f"| {metrics['recall']:.3f} | {metrics['f1']:.3f} "
+            f"| {metrics['onset_f1']:.3f} |"
+        )
+    lines.append("")
+    return lines
 
 
 def assert_benchmark_passes(benchmark: FixtureBenchmark) -> None:

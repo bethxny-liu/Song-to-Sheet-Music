@@ -76,11 +76,7 @@ def frames_with_pitch_discontinuity(
     min_jump_semitones: float = 3.0,
     merge_within_frames: int = 8,
 ) -> list[int]:
-    """Frames where local median MIDI jumps — catches melodic leaps before the first onset.
-
-    Onset detection often fires late for the downbeat; the opening phrase can live entirely
-    inside [0, first_onset) and would otherwise get one blended pitch from segment_pitches.
-    """
+    """Split points where local median MIDI jumps by `min_jump_semitones`."""
     n = len(midi_track)
     if n < half_window * 2 + 1:
         return []

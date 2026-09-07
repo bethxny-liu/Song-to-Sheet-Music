@@ -17,7 +17,7 @@ const sourceSerif = Source_Serif_4({
 
 export const metadata = {
   title: "Audio to Sheet Music",
-  description: "Convert audio recordings into readable sheet music"
+  description: "Convert a melody recording into sheet music"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

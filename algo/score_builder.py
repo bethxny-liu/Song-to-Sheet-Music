@@ -143,6 +143,27 @@ def _finalize_score(
     return score
 
 
+def quantize_to_beat_grid(
+    onset_sec: float,
+    duration_sec: float,
+    tempo_bpm: int,
+    *,
+    subdivision: int = 4,
+    min_quarter_length: float = 0.25,
+) -> tuple[float, float]:
+    """Snap an absolute-time note onto a beat grid (default: sixteenth notes)."""
+    beat_sec = 60.0 / max(int(tempo_bpm), 1)
+    step_sec = beat_sec / max(subdivision, 1)
+    onset_steps = max(0, int(round(max(0.0, onset_sec) / step_sec)))
+    end_steps = max(
+        onset_steps + 1,
+        int(round(max(0.0, onset_sec + duration_sec) / step_sec)),
+    )
+    onset_quarter = onset_steps / subdivision
+    quarter_length = max(min_quarter_length, (end_steps - onset_steps) / subdivision)
+    return onset_quarter, quarter_length
+
+
 def _make_note(midi_value: int, quarter_length: float) -> note.Note:
     n = note.Note()
     n.pitch.midi = midi_value
@@ -165,10 +186,9 @@ def build_score_timed(
     note_confidences: list[dict[str, float | str | int | None]] = []
 
     for timed_note in sorted(timed_notes, key=lambda n: (n.onset_sec, n.midi)):
-        raw_onset_q = (tempo_bpm * max(0.0, timed_note.onset_sec)) / 60.0
-        raw_dur_q = (tempo_bpm * max(0.0, timed_note.duration_sec)) / 60.0
-        onset_q = max(0.0, round(raw_onset_q * 4) / 4)
-        quarter_length = max(0.25, round(raw_dur_q * 4) / 4)
+        onset_q, quarter_length = quantize_to_beat_grid(
+            timed_note.onset_sec, timed_note.duration_sec, tempo_bpm
+        )
 
         n = _make_note(timed_note.midi, quarter_length)
         if options.layout == "melody":
@@ -210,9 +230,9 @@ def build_score_from_runs(
     add_chord_tones: bool,
 ) -> tuple[stream.Stream, list[dict[str, float | str | int | None]]]:
     """Build a score from sequential pitch runs (pYIN pipeline output)."""
-    score, right_hand, left_hand, mm = _init_parts(options, tonic, mode, tempo_bpm)
+    score, right_hand, left_hand, _mm = _init_parts(options, tonic, mode, tempo_bpm)
     note_confidences: list[dict[str, float | str | int | None]] = []
-    onset_quarter = 0.0
+    elapsed_seconds = 0.0
 
     for idx, (
         midi_pitch,
@@ -224,8 +244,11 @@ def build_score_from_runs(
     ) in enumerate(runs):
         if segment_frames <= 0:
             continue
-        seconds = max(segment_frames * frame_duration, 0.125)
-        quarter_length = max(0.25, round(mm.secondsToDuration(seconds).quarterLength * 4) / 4)
+        seconds = max(segment_frames * frame_duration, frame_duration)
+        onset_quarter, quarter_length = quantize_to_beat_grid(
+            elapsed_seconds, seconds, tempo_bpm
+        )
+        elapsed_seconds += seconds
         if (
             idx == len(runs) - 1
             and midi_pitch is not None
@@ -257,7 +280,6 @@ def build_score_from_runs(
                 else:
                     right_hand.insert(onset_quarter, n)
             note_confidences.append({**event, "type": "note", "midi": midi_value, "hand": hand})
-        onset_quarter += quarter_length
 
     _insert_chord_symbols(
         chord_events, tempo_bpm, right_hand, left_hand, add_chord_tones=add_chord_tones

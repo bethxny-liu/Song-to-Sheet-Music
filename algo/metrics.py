@@ -10,7 +10,7 @@ import mir_eval
 import numpy as np
 
 from algo.basic_pitch_transcriber import TimedNote
-from algo.models import PipelineResult
+from algo.models import DetectedNote, PipelineResult
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class ReferenceNote:
 
 @dataclass(frozen=True)
 class TranscriptionMetrics:
-    """Note-level overlap metrics (standard MIR transcription evaluation)."""
+    """Note-level overlap metrics from mir_eval."""
 
     precision: float
     recall: float
@@ -172,6 +172,18 @@ def evaluate_transcription(
     )
 
 
+def detected_notes_to_arrays(
+    notes: list[DetectedNote],
+) -> tuple[np.ndarray, np.ndarray]:
+    if not notes:
+        return np.empty((0, 2), dtype=float), np.empty(0, dtype=float)
+    intervals = np.array(
+        [[n.onset_sec, n.onset_sec + n.duration_sec] for n in notes], dtype=float
+    )
+    pitches = np.array([n.midi for n in notes], dtype=float)
+    return intervals, pitches
+
+
 def evaluate_pipeline_result(
     result: PipelineResult,
     reference: list[ReferenceNote],
@@ -181,7 +193,12 @@ def evaluate_pipeline_result(
     pitch_tolerance: float = 50.0,
 ) -> TranscriptionMetrics:
     ref_intervals, ref_pitches = reference_to_arrays(reference)
-    est_intervals, est_pitches = note_confidences_to_arrays(result.note_confidences, tempo_bpm)
+    if result.detected_notes:
+        est_intervals, est_pitches = detected_notes_to_arrays(result.detected_notes)
+    else:
+        est_intervals, est_pitches = note_confidences_to_arrays(
+            result.note_confidences, tempo_bpm
+        )
     return evaluate_transcription(
         est_intervals,
         est_pitches,

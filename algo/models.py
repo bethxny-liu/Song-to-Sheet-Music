@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from music21 import stream
 
 NoteEvent = tuple[float | None, int, float, float | None, str, float]
+
+
+@dataclass(frozen=True)
+class DetectedNote:
+    midi: int
+    onset_sec: float
+    duration_sec: float
+    confidence: float = 1.0
 
 
 @dataclass
@@ -14,11 +22,9 @@ class PipelineOptions:
     composer: str
     tempo_bpm: int
     instrument_name: str
-    """melody: single treble staff, monophonic path only (simple melodies / tutorials).
-    grand: piano grand staff; may use polyphonic top-voice when detection is weak."""
     layout: Literal["melody", "grand"] = "melody"
-    """When True, run Demucs piano-stem isolation before transcription (mixed audio)."""
     isolate_piano: bool = False
+    auto_detect_tempo: bool = False
     basic_pitch_onset_threshold: float | None = None
     basic_pitch_frame_threshold: float | None = None
 
@@ -35,3 +41,4 @@ class PipelineResult:
     chord_events: list[dict[str, float | str]]
     transcription_engine: str = "pyin"
     preprocessing: str = "none"
+    detected_notes: list[DetectedNote] = field(default_factory=list)

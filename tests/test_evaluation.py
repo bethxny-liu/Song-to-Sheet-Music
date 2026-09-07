@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from algo.evaluation import compare_engines_from_benchmarks, format_markdown_report
+from algo.evaluation import (
+    compare_engines_from_benchmarks,
+    evaluate_raw_pyin_baseline,
+    format_markdown_report,
+)
 from algo.metrics import TranscriptionMetrics
+from algo.synthetic_audio import build_tempo_reference, synthesize_benchmark_audio
 
 
 def _benchmark(fixture: str, layout: str, f1: float, engine: str, passed: bool = True):
@@ -65,9 +70,68 @@ def test_format_markdown_report_includes_tables():
                 "grand_engine": "basic_pitch",
             }
         ],
+        "controlled_benchmarks": [
+            {
+                "texture": "monophonic",
+                "tempo_bpm": 60,
+                "baseline_f1": 0.70,
+                "engine": "pyin",
+                "metrics": {
+                    "precision": 0.90,
+                    "recall": 0.80,
+                    "f1": 0.85,
+                    "onset_f1": 0.88,
+                },
+            },
+            {
+                "texture": "monophonic",
+                "tempo_bpm": 180,
+                "baseline_f1": 0.60,
+                "engine": "pyin",
+                "metrics": {
+                    "precision": 0.75,
+                    "recall": 0.70,
+                    "f1": 0.72,
+                    "onset_f1": 0.74,
+                },
+            },
+            {
+                "texture": "chords",
+                "tempo_bpm": 90,
+                "baseline_f1": None,
+                "engine": "basic_pitch",
+                "metrics": {
+                    "precision": 0.50,
+                    "recall": 0.40,
+                    "f1": 0.44,
+                    "onset_f1": 0.48,
+                },
+            },
+        ],
     }
     md = format_markdown_report(report)
     assert "# Transcription Evaluation Report" in md
     assert "c_major_scale" in md
     assert "Engine comparison" in md
+    assert "Controlled tempo benchmark" in md
+    assert "Polyphony benchmark" in md
+    assert "pYIN baseline F1" in md
+    assert "60 BPM" in md
+    assert "180 BPM" in md
+    assert "chords F1" in md
     assert "PASS" in md
+
+
+def test_raw_pyin_baseline_scores_synthetic_monophonic_phrase():
+    reference = build_tempo_reference(120, "monophonic")
+    signal, sample_rate = synthesize_benchmark_audio(reference)
+    metrics = evaluate_raw_pyin_baseline(signal, sample_rate, reference)
+    assert metrics.reference_note_count == 8
+    assert metrics.estimated_note_count > 0
+    assert 0.0 <= metrics.f1 <= 1.0
+
+
+def test_controlled_references_separate_polyphony_levels():
+    assert len(build_tempo_reference(120, "monophonic")) == 8
+    assert len(build_tempo_reference(120, "two_note_harmony")) == 16
+    assert len(build_tempo_reference(120, "chords")) == 32
