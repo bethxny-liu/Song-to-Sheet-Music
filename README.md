@@ -104,5 +104,3 @@ make test    # unit + baseline tests
 make eval    # MIR evaluation report → docs/EVALUATION.md
 cd client && npm test  # HTTP client error handling
 ```
-
-## License
