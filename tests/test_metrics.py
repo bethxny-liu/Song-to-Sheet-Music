@@ -1,6 +1,6 @@
 import numpy as np
 
-from algo.metrics import (
+from evaluation.metrics import (
     ReferenceNote,
     evaluate_transcription,
     reference_to_arrays,
@@ -30,7 +30,7 @@ def test_no_estimates_scores_zero():
 
 
 def test_evaluate_pipeline_result_prefers_detected_notes():
-    from algo.metrics import evaluate_pipeline_result
+    from evaluation.metrics import evaluate_pipeline_result
     from algo.models import DetectedNote, PipelineResult
     from music21 import stream
 
@@ -51,7 +51,6 @@ def test_evaluate_pipeline_result_prefers_detected_notes():
                 "confidence": 1.0,
             }
         ],
-        chord_events=[],
         detected_notes=[DetectedNote(midi=60, onset_sec=0.2, duration_sec=0.4)],
     )
     metrics = evaluate_pipeline_result(result, reference, tempo_bpm=90, onset_tolerance=0.05)
@@ -59,7 +58,7 @@ def test_evaluate_pipeline_result_prefers_detected_notes():
 
 
 def test_meets_thresholds_reports_failures():
-    from algo.metrics import TranscriptionMetrics
+    from evaluation.metrics import TranscriptionMetrics
 
     metrics = TranscriptionMetrics(
         precision=0.5,

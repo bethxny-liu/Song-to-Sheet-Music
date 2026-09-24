@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import NamedTuple
 
 from music21 import stream
 
-NoteEvent = tuple[float | None, int, float, float | None, str, float]
+class NoteEvent(NamedTuple):
+    """A processed pitch run. A missing pitch represents a rest.
+
+    Timing is in analysis frames; score_builder converts it to musical beats.
+    NamedTuple preserves the existing unpacking used by the processing passes.
+    """
+
+    pitch: float | None
+    frames: int
+    confidence: float
+    reattack_confidence: float | None
+    boundary_source: str
+    boundary_confidence: float
 
 
 @dataclass(frozen=True)
@@ -22,11 +34,6 @@ class PipelineOptions:
     composer: str
     tempo_bpm: int
     instrument_name: str
-    layout: Literal["melody", "grand"] = "melody"
-    isolate_piano: bool = False
-    auto_detect_tempo: bool = False
-    basic_pitch_onset_threshold: float | None = None
-    basic_pitch_frame_threshold: float | None = None
 
 
 @dataclass
@@ -38,7 +45,4 @@ class PipelineResult:
     pitch_times_sec: list[float]
     pitch_midi: list[float | None]
     note_confidences: list[dict[str, float | str | int | None]]
-    chord_events: list[dict[str, float | str]]
-    transcription_engine: str = "pyin"
-    preprocessing: str = "none"
     detected_notes: list[DetectedNote] = field(default_factory=list)

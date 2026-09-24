@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from algo.metrics import ReferenceNote
-from algo.synthetic_audio import (
+from evaluation.metrics import ReferenceNote
+from evaluation.synthetic_audio import (
     build_c_major_scale_reference,
     build_repeated_c_reference,
     synthesize_melody,

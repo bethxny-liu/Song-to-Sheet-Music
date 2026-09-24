@@ -7,10 +7,10 @@ __pycache__/
 *.mp3
 !docs/demo/*.mp3
 
-backend/.env
-backend/storage/
+services/.env
+services/storage/
 reports/
 
-frontend/node_modules/
-frontend/.next/
-frontend/out/
+client/node_modules/
+client/.next/
+client/out/

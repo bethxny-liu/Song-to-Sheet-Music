@@ -3,7 +3,7 @@ from algo.models import NoteEvent
 
 
 def _runs_from_midis(midis: list[int], frames: int = 40) -> list[NoteEvent]:
-    return [(float(m), frames, 0.9, None, "test", 0.9) for m in midis]
+    return [NoteEvent(float(m), frames, 0.9, None, "test", 0.9) for m in midis]
 
 
 def test_c_major_scale_estimates_c_major():

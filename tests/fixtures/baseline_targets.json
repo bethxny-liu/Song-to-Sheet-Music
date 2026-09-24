@@ -4,7 +4,6 @@
   "pitch_tolerance_cents": 50.0,
   "fixtures": {
     "c_major_scale": {
-      "layout": "melody",
       "tempo_bpm": 120,
       "expected_key": "C major",
       "thresholds": {
@@ -14,7 +13,6 @@
       }
     },
     "repeated_c": {
-      "layout": "melody",
       "tempo_bpm": 120,
       "expected_key": "C major",
       "thresholds": {

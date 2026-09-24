@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from music21 import note
-
 from algo.models import NoteEvent
 
 ONSET_BOUNDARY_SOURCES = {"onset", "attack", "onset+attack"}
@@ -92,7 +90,14 @@ def compress_pitch_track(
             runs.append((pitch, frames, has_attack, confidence, None, boundary_source, boundary_confidence))
 
     compressed = [
-        (pitch, frames, conf, reattack, source, bconf)
+        NoteEvent(
+            pitch=pitch,
+            frames=frames,
+            confidence=conf,
+            reattack_confidence=reattack,
+            boundary_source=source,
+            boundary_confidence=bconf,
+        )
         for pitch, frames, _, conf, reattack, source, bconf in runs
     ]
     return merge_short_runs(
@@ -109,40 +114,34 @@ def merge_short_runs(
         return runs
     merged: list[NoteEvent] = []
     for pitch, frames, confidence, reattack, boundary_source, boundary_confidence in runs:
-        if pitch is None and frames < min_rest_frames and merged and merged[-1][0] is not None:
+        if pitch is None and frames < min_rest_frames and merged and merged[-1].pitch is not None:
             prev_pitch, prev_frames, prev_conf, prev_reattack, prev_source, prev_bconf = merged[-1]
             total = prev_frames + frames
-            merged[-1] = (
-                prev_pitch,
-                total,
-                ((prev_conf * prev_frames) + (confidence * frames)) / max(1, total),
-                prev_reattack,
-                prev_source,
-                max(prev_bconf, boundary_confidence),
+            merged[-1] = merged[-1]._replace(
+                frames=total,
+                confidence=((prev_conf * prev_frames) + (confidence * frames)) / max(1, total),
+                boundary_confidence=max(prev_bconf, boundary_confidence),
             )
             continue
-        if merged and frames < min_frames and pitch is not None and merged[-1][0] is not None:
+        if merged and frames < min_frames and pitch is not None and merged[-1].pitch is not None:
             prev_pitch, prev_frames, prev_conf, prev_reattack, prev_source, prev_bconf = merged[-1]
             if abs(float(pitch) - float(prev_pitch)) <= 1.0:
                 total = prev_frames + frames
-                merged[-1] = (
-                    prev_pitch,
-                    total,
-                    ((prev_conf * prev_frames) + (confidence * frames)) / max(1, total),
-                    prev_reattack,
-                    prev_source,
-                    max(prev_bconf, boundary_confidence),
+                merged[-1] = merged[-1]._replace(
+                    frames=total,
+                    confidence=((prev_conf * prev_frames) + (confidence * frames)) / max(1, total),
+                    boundary_confidence=max(prev_bconf, boundary_confidence),
                 )
                 continue
-        merged.append((pitch, frames, confidence, reattack, boundary_source, boundary_confidence))
+        merged.append(NoteEvent(
+            pitch=pitch,
+            frames=frames,
+            confidence=confidence,
+            reattack_confidence=reattack,
+            boundary_source=boundary_source,
+            boundary_confidence=boundary_confidence,
+        ))
     return merged
-
-
-def trim_leading_rests(runs: list[NoteEvent]) -> list[NoteEvent]:
-    start_idx = 0
-    while start_idx < len(runs) and runs[start_idx][0] is None:
-        start_idx += 1
-    return runs[start_idx:]
 
 
 def merge_tiny_same_pitch_fragments(
@@ -165,16 +164,21 @@ def merge_tiny_same_pitch_fragments(
         )
         if same_pitch and frames <= tiny_fragment_max_frames and not keep_onset_split:
             total = prev_frames + frames
-            merged[-1] = (
-                prev_pitch,
-                total,
-                ((prev_confidence * prev_frames) + (confidence * frames)) / max(1, total),
-                prev_reattack if prev_reattack is not None else reattack,
-                prev_bsource,
-                max(prev_bconf, bconf),
+            merged[-1] = merged[-1]._replace(
+                frames=total,
+                confidence=((prev_confidence * prev_frames) + (confidence * frames)) / max(1, total),
+                reattack_confidence=prev_reattack if prev_reattack is not None else reattack,
+                boundary_confidence=max(prev_bconf, bconf),
             )
         else:
-            merged.append((pitch, frames, confidence, reattack, bsource, bconf))
+            merged.append(NoteEvent(
+                pitch=pitch,
+                frames=frames,
+                confidence=confidence,
+                reattack_confidence=reattack,
+                boundary_source=bsource,
+                boundary_confidence=bconf,
+            ))
     return merged
 
 
@@ -195,7 +199,14 @@ def bridge_same_pitch_across_tiny_rests(
             if same_note and p2 is None and f2 <= tiny_rest_max_frames and not articulated:
                 total = f1 + f2 + f3
                 weighted_conf = ((c1 * f1) + (c2 * f2) + (c3 * f3)) / max(1, total)
-                bridged.append((p1, total, weighted_conf, r1 if r1 is not None else r3, s1, max(b1, b2, b3)))
+                bridged.append(NoteEvent(
+                    pitch=p1,
+                    frames=total,
+                    confidence=weighted_conf,
+                    reattack_confidence=r1 if r1 is not None else r3,
+                    boundary_source=s1,
+                    boundary_confidence=max(b1, b2, b3),
+                ))
                 i += 3
                 continue
         bridged.append(runs[i])
@@ -225,16 +236,20 @@ def merge_low_confidence_boundary_splits(
         onset_split = is_split_boundary(False, source, bconf)
         if same_pitch and (weak_split or very_weak_boundary) and not onset_split:
             total = prev_frames + frames
-            merged[-1] = (
-                prev_pitch,
-                total,
-                ((prev_conf * prev_frames) + (conf * frames)) / max(1, total),
-                prev_reattack,
-                prev_source,
-                max(prev_bconf, bconf),
+            merged[-1] = merged[-1]._replace(
+                frames=total,
+                confidence=((prev_conf * prev_frames) + (conf * frames)) / max(1, total),
+                boundary_confidence=max(prev_bconf, bconf),
             )
         else:
-            merged.append((pitch, frames, conf, reattack, source, bconf))
+            merged.append(NoteEvent(
+                pitch=pitch,
+                frames=frames,
+                confidence=conf,
+                reattack_confidence=reattack,
+                boundary_source=source,
+                boundary_confidence=bconf,
+            ))
     return merged
 
 
@@ -247,7 +262,14 @@ def final_merge_weak_same_pitch_events(
     for pitch, frames, conf, reattack, source, bconf in runs[1:]:
         prev_pitch, prev_frames, prev_conf, prev_reattack, prev_source, prev_bconf = merged[-1]
         if pitch is None or prev_pitch is None:
-            merged.append((pitch, frames, conf, reattack, source, bconf))
+            merged.append(NoteEvent(
+                pitch=pitch,
+                frames=frames,
+                confidence=conf,
+                reattack_confidence=reattack,
+                boundary_source=source,
+                boundary_confidence=bconf,
+            ))
             continue
         same_midi = int(round(float(pitch))) == int(round(float(prev_pitch)))
         weak_boundary = bconf < weak_boundary_threshold
@@ -255,50 +277,18 @@ def final_merge_weak_same_pitch_events(
         onset_split = is_split_boundary(False, source, bconf)
         if same_midi and weak_boundary and no_reattack and not onset_split:
             total = prev_frames + frames
-            merged[-1] = (
-                prev_pitch,
-                total,
-                ((prev_conf * prev_frames) + (conf * frames)) / max(1, total),
-                prev_reattack,
-                prev_source,
-                max(prev_bconf, bconf),
+            merged[-1] = merged[-1]._replace(
+                frames=total,
+                confidence=((prev_conf * prev_frames) + (conf * frames)) / max(1, total),
+                boundary_confidence=max(prev_bconf, bconf),
             )
         else:
-            merged.append((pitch, frames, conf, reattack, source, bconf))
+            merged.append(NoteEvent(
+                pitch=pitch,
+                frames=frames,
+                confidence=conf,
+                reattack_confidence=reattack,
+                boundary_source=source,
+                boundary_confidence=bconf,
+            ))
     return merged
-
-
-def major_scale_pitch_classes(tonic: str) -> set[int]:
-    tonic_pc = note.Note(tonic).pitch.pitchClass
-    return {(tonic_pc + step) % 12 for step in (0, 2, 4, 5, 7, 9, 11)}
-
-
-def nearest_in_scale_midi(midi_int: int, scale_pcs: set[int]) -> int:
-    if midi_int % 12 in scale_pcs:
-        return midi_int
-    for distance in range(1, 4):
-        down = midi_int - distance
-        up = midi_int + distance
-        if down % 12 in scale_pcs:
-            return down
-        if up % 12 in scale_pcs:
-            return up
-    return midi_int
-
-
-def stabilize_out_of_scale_notes(
-    runs: list[NoteEvent], tonic: str, min_duration_frames: int
-) -> list[NoteEvent]:
-    scale_pcs = major_scale_pitch_classes(tonic)
-    stabilized: list[NoteEvent] = []
-    for pitch, frames, confidence, reattack, bsource, bconf in runs:
-        if pitch is None:
-            stabilized.append((pitch, frames, confidence, reattack, bsource, bconf))
-            continue
-        midi_int = int(round(pitch))
-        if midi_int % 12 in scale_pcs or frames >= min_duration_frames:
-            stabilized.append((pitch, frames, confidence, reattack, bsource, bconf))
-            continue
-        snapped = nearest_in_scale_midi(midi_int, scale_pcs)
-        stabilized.append((float(snapped), frames, confidence, reattack, bsource, bconf))
-    return stabilized

@@ -6,9 +6,42 @@ from pathlib import Path
 
 import pytest
 
-from algo.evaluation import assert_benchmark_passes, run_fixture_benchmark
-from algo.metrics import ReferenceNote
+from evaluation.run import assert_benchmark_passes, run_fixture_benchmark
+from evaluation.metrics import ReferenceNote
 from algo.pipeline import AudioToSheetPipeline
+
+
+@pytest.mark.parametrize("sample_rate", [22050, 44100])
+def test_short_chromatic_note_is_not_rewritten_to_fit_key(tmp_path, sample_rate):
+    from algo.models import PipelineOptions
+    from evaluation.metrics import evaluate_pipeline_result
+    from evaluation.synthetic_audio import synthesize_benchmark_audio, write_wav
+
+    # F-sharp is a short passing tone in a phrase dominated by C-major notes.
+    reference = []
+    onset = 0.2
+    for midi in [60, 64, 67, 66, 67, 64, 62, 60]:
+        duration = 0.09 if midi == 66 else 0.4
+        reference.append(ReferenceNote(midi, onset, duration))
+        onset += duration + 0.12
+    signal, sr = synthesize_benchmark_audio(reference, sample_rate=sample_rate)
+    wav = write_wav(tmp_path / "chromatic.wav", signal, sr)
+    result = AudioToSheetPipeline().run(wav, PipelineOptions("Chromatic", "Test", 120, "piano"))
+
+    assert [n.midi for n in result.detected_notes] == [n.midi for n in reference]
+    assert 66 in [n.pitch.midi for n in result.score.recurse().notes if n.isNote]
+    assert evaluate_pipeline_result(result, reference, 120, onset_tolerance=0.12).f1 == 1.0
+
+
+def test_melody_pipeline_returns_no_chord_data(tmp_path):
+    from algo.models import PipelineOptions
+    from evaluation.synthetic_audio import synthesize_melody, write_wav
+
+    reference = [ReferenceNote(64, 0.2, 0.4), ReferenceNote(62, 0.8, 0.4)]
+    signal, sr = synthesize_melody(reference)
+    wav = write_wav(tmp_path / "melody.wav", signal, sr)
+    result = AudioToSheetPipeline().run(wav, PipelineOptions("Melody", "Test", 90, "piano"))
+    assert result.detected_notes
 
 
 def _run_configured_fixture(
@@ -22,7 +55,6 @@ def _run_configured_fixture(
     benchmark = run_fixture_benchmark(
         AudioToSheetPipeline(),
         fixture_name,
-        layout=str(cfg["layout"]),
         tempo_bpm=int(cfg["tempo_bpm"]),
         reference=reference,
         targets=baseline_targets,
@@ -55,34 +87,3 @@ def test_repeated_c_baseline(
         baseline_targets=baseline_targets,
         fixture_name="repeated_c",
     )
-
-
-@pytest.mark.slow
-def test_basic_pitch_on_synthetic_scale(
-    tmp_path: Path,
-    c_major_scale_reference: list[ReferenceNote],
-):
-    """Basic Pitch baseline on synthetic audio. Skipped if the model is missing."""
-    from algo.basic_pitch_transcriber import is_available, transcribe
-    from algo.evaluation import GRAND_BP_FRAME_THRESHOLD, GRAND_BP_ONSET_THRESHOLD
-    from algo.metrics import evaluate_transcription, reference_to_arrays, timed_notes_to_arrays
-    from algo.synthetic_audio import synthesize_melody, write_wav
-
-    if not is_available():
-        pytest.skip("Basic Pitch not available")
-
-    signal, sr = synthesize_melody(c_major_scale_reference)
-    wav = write_wav(tmp_path / "bp_scale.wav", signal, sr)
-    notes = transcribe(
-        wav,
-        melody_only=False,
-        onset_threshold=GRAND_BP_ONSET_THRESHOLD,
-        frame_threshold=GRAND_BP_FRAME_THRESHOLD,
-        minimum_note_length_ms=50.0,
-    )
-    assert notes, "Basic Pitch returned no notes on synthetic scale"
-
-    ref_i, ref_p = reference_to_arrays(c_major_scale_reference)
-    est_i, est_p = timed_notes_to_arrays(notes)
-    metrics = evaluate_transcription(est_i, est_p, ref_i, ref_p, onset_tolerance=0.15)
-    assert metrics.f1 >= 0.5, f"Basic Pitch F1 too low: {metrics.to_dict()}"

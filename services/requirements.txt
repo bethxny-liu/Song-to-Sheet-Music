@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-multipart
+librosa
+music21
+numpy<2
+matplotlib

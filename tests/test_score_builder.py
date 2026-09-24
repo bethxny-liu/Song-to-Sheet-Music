@@ -1,3 +1,5 @@
+import pytest
+
 from algo.score_builder import quantize_to_beat_grid
 
 
