@@ -1,6 +1,8 @@
 <img width="991" height="192" alt="image" src="https://github.com/user-attachments/assets/1463e626-efa2-4112-8d38-3685a985ba61" />
 
-Audio-to-sheet-music transcription for clear, single-line melodies.
+Hey :) This is a project I made to make it easier for myself when composing music on piano. As of now, the project is able to provide a transcription for clear, single-line melodies.
+
+Improvements in progress!!
 
 ## Overview
 
